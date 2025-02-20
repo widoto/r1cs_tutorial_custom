@@ -1,10 +1,10 @@
-use crate::common::*;
+use crate::gadgets::hash::pedersen::common::*;
 use crate::{Root, SimplePath};
+
 use ark_crypto_primitives::crh::{TwoToOneCRH, TwoToOneCRHGadget, CRH};
 use ark_crypto_primitives::merkle_tree::constraints::PathVar;
 use ark_r1cs_std::prelude::*;
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
-
 // (You don't need to worry about what's going on in the next two type definitions,
 // just know that these are types that you can use.)
 
@@ -57,6 +57,7 @@ impl ConstraintSynthesizer<ConstraintF> for MerkleTreeVerification {
 
         // TODO: FILL IN THE BLANK!
         // let is_member = XYZ
+
         //
         // is_member.enforce_equal(&Boolean::TRUE)?;
 
