@@ -40,7 +40,8 @@ pub trait SignatureScheme {
 #[cfg(test)]
 mod test {
     use crate::gadgets::signature::{schnorr, *};
-    use ark_ed_on_bls12_381::EdwardsProjective as JubJub;
+    // use ark_ed_on_bls12_381::EdwardsProjective as JubJub;
+    use ark_ed_on_bn254::EdwardsProjective as JubJub;
     use ark_std::test_rng;
 
     fn sign_and_verify<S: SignatureScheme>(message: &[u8]) {

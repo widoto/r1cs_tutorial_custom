@@ -6,7 +6,6 @@ use ark_ff::{
     fields::{Field, PrimeField},
     to_bytes, ToConstraintField, UniformRand,
 };
-use ark_std::io::{Result as IoResult, Write};
 use ark_std::rand::Rng;
 use ark_std::{hash::Hash, marker::PhantomData, vec::Vec};
 use blake2::Blake2s;

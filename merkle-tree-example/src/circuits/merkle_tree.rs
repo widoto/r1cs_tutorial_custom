@@ -3,7 +3,8 @@ use crate::gadgets::hash::pedersen::constraints::{RootVar, SimplePathVar};
 use crate::{Root, SimplePath};
 
 use ark_crypto_primitives::crh::{TwoToOneCRH, CRH};
-use ark_ed_on_bls12_381::Fq as Fp;
+// use ark_ed_on_bls12_381::Fq as Fp;
+use ark_bn254::Fr as Fp;
 use ark_r1cs_std::fields::fp::FpVar;
 use ark_r1cs_std::prelude::*;
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
@@ -22,10 +23,10 @@ pub struct MerkleTreeCircuit {
     pub authentication_path: Option<SimplePath>,
 }
 
-impl ConstraintSynthesizer<ConstraintF> for MerkleTreeCircuit {
+impl ConstraintSynthesizer<ark_bn254::Fr> for MerkleTreeCircuit {
     fn generate_constraints(
         self,
-        cs: ConstraintSystemRef<ConstraintF>,
+        cs: ConstraintSystemRef<ark_bn254::Fr>,
     ) -> Result<(), SynthesisError> {
         let leaf_crh_params = LeafHashParamsVar::new_constant(cs.clone(), &self.leaf_crh_params)?;
         let two_to_one_crh_params =
@@ -63,7 +64,6 @@ impl ConstraintSynthesizer<ConstraintF> for MerkleTreeCircuit {
 #[cfg(test)]
 pub mod test {
 
-    use ark_bls12_381::Bls12_381;
     use ark_crypto_primitives::crh::TwoToOneCRH;
     use ark_groth16::Groth16;
     use ark_snark::{CircuitSpecificSetupSNARK, SNARK};
@@ -81,7 +81,8 @@ pub mod test {
     #[test]
     fn test_merkle_trees() {
         use ark_crypto_primitives::crh::CRH;
-        use ark_ed_on_bls12_381::Fq as Fp;
+        // use ark_ed_on_bls12_381::Fq as Fp;
+        use ark_bn254::Fr as Fp;
 
         // Let's set up an RNG for use within tests. Note that this is *not* safe
         // for any production use.
@@ -129,18 +130,21 @@ pub mod test {
             authentication_path: Some(proof),
         };
 
-        let (pk, vk) = Groth16::<Bls12_381>::setup(circuit.clone(), rng).unwrap();
+        let (pk, vk) = Groth16::<ark_bn254::Bn254>::setup(circuit.clone(), rng).unwrap();
 
-        let pvk = Groth16::<Bls12_381>::process_vk(&vk).unwrap();
+        let pvk = Groth16::<ark_bn254::Bn254>::process_vk(&vk).unwrap();
 
         // let leaf_fp = BigInteger256::from(9u8);
         let leaf_fp = Fp::from(9u8);
         let verify_inputs = [root, leaf_fp];
 
-        let proofs = Groth16::<Bls12_381>::prove(&pk, circuit, rng).unwrap();
+        let proofs = Groth16::<ark_bn254::Bn254>::prove(&pk, circuit, rng).unwrap();
 
-        assert!(
-            Groth16::<Bls12_381>::verify_with_processed_vk(&pvk, &verify_inputs, &proofs).unwrap(),
+        assert!(Groth16::<ark_bn254::Bn254>::verify_with_processed_vk(
+            &pvk,
+            &verify_inputs,
+            &proofs
         )
+        .unwrap(),)
     }
 }
