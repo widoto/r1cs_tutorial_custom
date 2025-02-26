@@ -147,7 +147,7 @@ pub mod test {
     use std::fs;
 
     #[test]
-    fn test_merkle_trees() {
+    fn test_did() {
         use ark_bn254::Fr as Fp;
         use ark_crypto_primitives::crh::CRH;
         use secp256k1::{Message, Secp256k1, SecretKey};
@@ -347,6 +347,16 @@ pub mod test {
         let pubkey_hash = Keccak256::digest(&pubkey_bytes[1..]);
         let eth_address = &pubkey_hash[12..];
 
+        let sig_json = json!({
+            "message": message,
+            "v": v,
+            "r" : "0x".to_owned() + &hex::encode(r),
+            "s" : "0x".to_owned() + &hex::encode(s),
+            "pk" : "0x".to_owned() + &hex::encode(eth_address)
+        });
+
+        //println!("input : {:?}", input_json);
+        fs::write("../contract/public/sig.json", sig_json.to_string()).expect("Failed to save sig");
         println!("Message: {}", message);
         println!("Ethereum Address: 0x{}", hex::encode(eth_address));
         println!("v: {}, r: 0x{}, s: 0x{}", v, hex::encode(r), hex::encode(s));
