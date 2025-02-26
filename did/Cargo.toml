@@ -1,5 +1,5 @@
 [package]
-name = "merkle-tree-example"
+name = "did"
 version = "0.3.0"
 authors = ["arkworks contributors"]
 edition = "2018"
@@ -19,7 +19,7 @@ ark-serialize-derive = "0.4"
 ark-crypto-primitives = { version = "^0.3.0", default-features = true, features = [ "r1cs" ] }
 tracing = { version = "0.1", default-features = false, features = [ "attributes" ] }
 tracing-subscriber = { version = "0.2" }
-
+thiserror = "1.0.61"
 ark-bn254 = "0.3.0"
 ark-ed-on-bn254 = {version = "^0.3.0", features = [ "r1cs" ]}
 ark-groth16 = "0.3.0"
@@ -31,3 +31,6 @@ hex = "0.4.3"
 lazy_static = "1.4.0"
 serde_json = "1.0.108"
 num-bigint = "0.4.0"
+rand = "0.8.5"
+secp256k1 = { version = "0.28", features = ["recovery"] }
+sha3 = "0.10.8"

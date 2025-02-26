@@ -2,9 +2,6 @@
 pragma solidity >=0.8.0;
 
 library LibGroth16AltBN128 {
-    // BN128 에서는 G1이 2개의 uint256로 구성되어 있고, G2는 4개의 uint256로 구성되어 있다.
-    // 참고자료 : https://github.com/clearmatics/zeth/blob/master/zeth_contracts/contracts/LibGroth16AltBN128.sol
-
     // VerifyingKey :
     //      uint256[2] alpha    : G_1
     //      uint256[4] beta     : G_2 (minus)
@@ -43,11 +40,9 @@ library LibGroth16AltBN128 {
 
         assembly {
             let g := sub(gas(), 2000)
-            // 배열 첫번째 원소에는 배열의 길이가 담겨져 있음
-            // 즉, proof의 첫번째 word에는 길이가 존재
             let proof_i := add(proof, 0x20) // proof[0]의 주소
 
-            mstore(io, vk.slot) // slot은 상태 변수의 idx를 뜻함
+            mstore(io, vk.slot)
             vk_slot_num := keccak256(io, 0x20)
             let abc_slot_num := add(vk_slot_num, 14)
 
@@ -81,21 +76,6 @@ library LibGroth16AltBN128 {
                 success := and(success, and(s1, s2))
             }
 
-            //mstore(add(io, 0x40), mload(add(proof_i, 0x100))) // proof[8]을 io[0]에 저장
-            //mstore(add(io, 0x60), mload(add(proof_i, 0x120))) // proof[9]을 io[1]에 저장
-            // calculate PI + proof.D and store it in io[18] ~ io[21]
-            // success := and(
-            //     success,
-            //     call(
-            //         gas(),
-            //         0x06,
-            //         0,
-            //         io,
-            //         0x80,
-            //         add(io, 0x240), // io[18]
-            //         0x40
-            //     )
-            // )
             mstore(add(io, 0x240), mload(io))
             mstore(add(io, 0x260), mload(add(io, 0x20)))
         }

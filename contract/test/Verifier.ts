@@ -4,6 +4,7 @@ import { ethers } from "hardhat";
 import input from '../public/input.json';
 import vk from '../public/vk.json';
 import proof from '../public/proof.json';
+import sig from '../public/sig.json';
 
 describe("Verifier", function () {
   // We define a fixture to reuse the same setup in every test.
@@ -12,6 +13,11 @@ describe("Verifier", function () {
     let mock_input = input.input;
     let mock_proof = proof.proof;
     let mock_vk = vk.vk;
+    let mock_message = sig.message;
+    let mock_v = sig.v;
+    let mock_r = sig.r;
+    let mock_s = sig.s;
+    let mock_pk = sig.pk;
 
   async function deployVerifierFixture() {
 
@@ -25,7 +31,7 @@ describe("Verifier", function () {
 
   describe("Checking VroomLicenseCircuit", function () {
         
-    it("isUpper20YearsOld = true", async function () {
+    it("isValidVroomDriver = true", async function () {
         
         const { verifier } = await loadFixture(deployVerifierFixture);
         
@@ -33,6 +39,15 @@ describe("Verifier", function () {
         
         expect(result).to.equal(true);
     });
+
+    it("isSignatureValid = true", async function () {
+        
+      const { verifier } = await loadFixture(deployVerifierFixture);
+      
+      const result = await verifier.verifySignature.staticCall(mock_message, mock_v, mock_r, mock_s, mock_pk);
+      
+      expect(result).to.equal(true);
+  });
 
   });
 });

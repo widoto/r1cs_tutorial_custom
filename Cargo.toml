@@ -1,7 +1,7 @@
 [workspace]
 
 members = [
-    "merkle-tree-example",
+    "did",
 ]
 
 [profile.release]

@@ -48,13 +48,9 @@ impl ConstraintSynthesizer<ark_bn254::Fr> for MerkleTreeCircuit {
 
         // Now, we have to check membership. How do we do that?
         // Hint: look at https://github.com/arkworks-rs/crypto-primitives/blob/6be606259eab0aec010015e2cfd45e4f134cd9bf/src/merkle_tree/constraints.rs#L135
-
-        // TODO: FILL IN THE BLANK!
-        // verify_membership이 가지는 leaf 타입의 경우 ToBytesGadget인데, 이거를 FieldVar는 구현을 하고 있어서 FpVar로 바꿔서 받아왔다.
         let is_member =
             path.verify_membership(&leaf_crh_params, &two_to_one_crh_params, &root, &leaf)?;
-        // let is_member = XYZ
-        //
+
         is_member.enforce_equal(&Boolean::TRUE)?;
 
         Ok(())

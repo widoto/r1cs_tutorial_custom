@@ -2,14 +2,16 @@ use crate::gadgets::hash::pedersen::common::*;
 use crate::gadgets::hash::pedersen::constraints::{RootVar, SimplePathVar};
 use crate::{Root, SimplePath};
 
-use ark_crypto_primitives::crh::{TwoToOneCRH, CRH};
-// use ark_ed_on_bls12_381::Fq as Fp;
 use ark_bn254::Fr as Fp;
+use ark_crypto_primitives::crh::{TwoToOneCRH, CRH};
+use ark_crypto_primitives::CRHGadget;
+use ark_ed_on_bn254::constraints::EdwardsVar;
+use ark_ed_on_bn254::EdwardsProjective as JubJub;
 use ark_r1cs_std::fields::fp::FpVar;
 use ark_r1cs_std::prelude::*;
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
-// statement = {[20, 30], rt, current_time, h_birthday, h_exp}
-// witness = {이름, 생년월일, 유효기간}
+type TestCRHGadget =
+    ark_crypto_primitives::crh::pedersen::constraints::CRHGadget<JubJub, EdwardsVar, LeafWindow>;
 
 #[derive(Clone)]
 pub struct VroomLicenseCircuit<Fp> {
@@ -18,30 +20,44 @@ pub struct VroomLicenseCircuit<Fp> {
     pub two_to_one_crh_params: <TwoToOneHash as TwoToOneCRH>::Parameters,
 
     // These are the public inputs to the circuit.
-    pub root: Root,
-    // pub leaf_birth: Fp, // 이걸 숨기고 싶은건데 왜...?
-    pub leaf_exp: Fp,
-    pub cur_time: Fp,
+    pub root: Root,     // value of merkle root
+    pub exp_hash: Fp,   // leaf node of mt
+    pub birth_hash: Fp, // leaf node of mt
+    pub cur_time: Fp,   // criterion time
 
     // This is the private witness to the circuit.
     pub auth_path_exp: Option<SimplePath>,
     pub auth_path_birth: Option<SimplePath>,
     pub birth: Fp,
+    pub birth_rng: <LeafHash as CRH>::Parameters, // TODO : only put rng
+    pub exp: Fp,
+    pub exp_rng: <LeafHash as CRH>::Parameters, // TODO : only put rng
 }
 
 impl ConstraintSynthesizer<Fp> for VroomLicenseCircuit<Fp> {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fp>) -> Result<(), SynthesisError> {
+        // constant
         let leaf_crh_params = LeafHashParamsVar::new_constant(cs.clone(), &self.leaf_crh_params)?;
         let two_to_one_crh_params =
             TwoToOneHashParamsVar::new_constant(cs.clone(), &self.two_to_one_crh_params)?;
 
-        // First, we allocate the public inputs
+        // public inputs
         let root = RootVar::new_input(ark_relations::ns!(cs, "root_var"), || Ok(&self.root))?;
 
-        let leaf_exp = FpVar::new_input(ark_relations::ns!(cs, "leaf_var"), || Ok(&self.leaf_exp))?;
+        let exp_hash =
+            FpVar::new_input(
+                ark_relations::ns!(cs, "exp_hash_var"),
+                || Ok(&self.exp_hash),
+            )?;
+
+        let birth_hash = FpVar::new_input(ark_relations::ns!(cs, "birth_hash_var"), || {
+            Ok(&self.birth_hash)
+        })?;
+
         let cur_time =
             FpVar::new_input(ark_relations::ns!(cs, "curtime_var"), || Ok(&self.cur_time))?;
 
+        // witness
         let auth_path_exp = SimplePathVar::new_witness(ark_relations::ns!(cs, "path_var"), || {
             Ok(self.auth_path_exp.as_ref().unwrap())
         })?;
@@ -50,32 +66,58 @@ impl ConstraintSynthesizer<Fp> for VroomLicenseCircuit<Fp> {
             SimplePathVar::new_witness(ark_relations::ns!(cs, "path_var"), || {
                 Ok(self.auth_path_birth.as_ref().unwrap())
             })?;
-        let birth = FpVar::new_witness(ark_relations::ns!(cs, "birth_var"), || Ok(self.birth))?;
 
+        let birth = FpVar::new_witness(ark_relations::ns!(cs, "birth_var"), || Ok(self.birth))?;
+        let birth_rng =
+            LeafHashParamsVar::new_witness(ark_relations::ns!(cs, "birth_rng_var"), || {
+                Ok(&self.birth_rng)
+            })?;
+
+        let exp = FpVar::new_witness(ark_relations::ns!(cs, "exp_var"), || Ok(self.exp))?;
+        let exp_rng =
+            LeafHashParamsVar::new_witness(ark_relations::ns!(cs, "birth_rng_var"), || {
+                Ok(&self.birth_rng)
+            })?;
+
+        // check hash of birth
+        let birth_bytes = birth.to_bytes()?;
+        let predicted_birth_hash = TestCRHGadget::evaluate(&birth_rng, &birth_bytes).unwrap();
+        birth_hash.enforce_equal(&predicted_birth_hash.x)?;
+
+        // check hash of exp
+        let exp_bytes = exp.to_bytes()?;
+        let predicted_exp_hash = TestCRHGadget::evaluate(&exp_rng, &exp_bytes).unwrap();
+        exp_hash.enforce_equal(&predicted_exp_hash.x)?;
+
+        // check membership of expiration
         let is_member_exp = auth_path_exp.verify_membership(
             &leaf_crh_params,
             &two_to_one_crh_params,
             &root,
-            &leaf_exp,
+            &exp_hash,
         )?;
 
         is_member_exp.enforce_equal(&Boolean::TRUE)?;
 
+        // check membership of birth
         let is_member_birth = auth_path_birth.verify_membership(
             &leaf_crh_params,
             &two_to_one_crh_params,
             &root,
-            &birth,
+            &birth_hash,
         )?;
 
         is_member_birth.enforce_equal(&Boolean::TRUE)?;
 
-        // 20세 이상인가?
-        let gap = cur_time - birth;
-        let age20 = Fp::from(199999u64);
-        let gap_std = FpVar::new_constant(cs.clone(), age20)?;
+        // check expiration > current
+        exp.enforce_cmp(&cur_time, std::cmp::Ordering::Greater, false)?;
 
-        gap.enforce_cmp(&gap_std, std::cmp::Ordering::Greater, false)?;
+        // 20 < age < 30
+        let age_gap = cur_time - birth;
+        let criterion_low = FpVar::Constant(Fp::from(19u64));
+        let criterion_high = FpVar::Constant(Fp::from(31u64));
+        age_gap.enforce_cmp(&criterion_low, std::cmp::Ordering::Greater, false)?;
+        criterion_high.enforce_cmp(&age_gap, std::cmp::Ordering::Greater, false)?;
 
         Ok(())
     }
@@ -87,6 +129,7 @@ pub mod test {
     use ark_crypto_primitives::crh::TwoToOneCRH;
     use ark_ff::{BigInteger, PrimeField};
     use ark_groth16::Groth16;
+    use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
     use ark_snark::{CircuitSpecificSetupSNARK, SNARK};
     use ark_std::{
         rand::{RngCore, SeedableRng},
@@ -99,62 +142,66 @@ pub mod test {
         gadgets::hash::pedersen::common::{LeafHash, TwoToOneHash},
         SimpleMerkleTree,
     };
-
-    use std::ffi::{c_char, CStr};
-
-    use ark_bn254::Fr;
-
-    pub fn str_from_c_str<'a>(ptr: *const c_char) -> &'a str {
-        let c_str = unsafe { CStr::from_ptr(ptr) };
-        let str = c_str.to_str().expect("Invalid UTF-8");
-        str
-    }
-
     use num_bigint::BigUint;
-
-    fn fr_to_decimal(value: Fr) -> String {
-        let big_int = value.into_repr(); // 내부 BigInteger256 가져오기
-        BigUint::from_bytes_le(&big_int.to_bytes_le()).to_string() // 10진수 문자열로 변환
-    }
+    use sha3::{Digest, Keccak256};
+    use std::fs;
 
     #[test]
     fn test_merkle_trees() {
-        use ark_crypto_primitives::crh::CRH;
-        // use ark_ed_on_bls12_381::Fq as Fp;
         use ark_bn254::Fr as Fp;
-        // Let's set up an RNG for use within tests. Note that this is *not* safe
-        // for any production use.
-        // let mut rng = ark_std::test_rng();
+        use ark_crypto_primitives::crh::CRH;
+        use secp256k1::{Message, Secp256k1, SecretKey};
+
+        // birth hash
+        let birth: ark_ff::Fp256<ark_bn254::FrParameters> = Fp::from(2001u64);
+
+        let rng_b = &mut ark_std::rand::rngs::StdRng::seed_from_u64(test_rng().next_u64());
+        let birth_rng: ark_crypto_primitives::crh::pedersen::Parameters<
+            ark_ec::twisted_edwards_extended::GroupProjective<ark_ed_on_bn254::EdwardsParameters>,
+        > = <LeafHash as CRH>::setup(rng_b).unwrap();
+
+        let birth_big = BigUint::from_bytes_le(&birth.into_repr().to_bytes_le());
+        let birth_bytes = birth_big.to_bytes_le();
+        let birth_hash = <LeafHash as CRH>::evaluate(&birth_rng, &birth_bytes).unwrap();
+
+        // expire hash
+        let exp = Fp::from(2040u64);
+
+        let rng_e = &mut ark_std::rand::rngs::StdRng::seed_from_u64(test_rng().next_u64());
+        let exp_rng: ark_crypto_primitives::crh::pedersen::Parameters<
+            ark_ec::twisted_edwards_extended::GroupProjective<ark_ed_on_bn254::EdwardsParameters>,
+        > = <LeafHash as CRH>::setup(rng_e).unwrap();
+
+        let exp_big = BigUint::from_bytes_le(&exp.into_repr().to_bytes_le());
+        let exp_bytes = exp_big.to_bytes_le();
+        let exp_hash = <LeafHash as CRH>::evaluate(&exp_rng, &exp_bytes).unwrap();
+
+        // merkle tree
         let rng = &mut ark_std::rand::rngs::StdRng::seed_from_u64(test_rng().next_u64());
-        // First, let's sample the public parameters for the hash functions:
         let leaf_crh_params = <LeafHash as CRH>::setup(rng).unwrap();
         let two_to_one_crh_params = <TwoToOneHash as TwoToOneCRH>::setup(rng).unwrap();
 
-        // Next, let's construct our tree.
-        // This follows the API in https://github.com/arkworks-rs/crypto-primitives/blob/6be606259eab0aec010015e2cfd45e4f134cd9bf/src/merkle_tree/mod.rs#L156
         let tree = SimpleMerkleTree::new(
             &leaf_crh_params,
             &two_to_one_crh_params,
             &[
-                Fp::from(20400318u64), // exp
-                Fp::from(20010319u64),
+                birth_hash,
+                exp_hash,
                 Fp::from(0u64),
                 Fp::from(0u64),
                 Fp::from(0u64),
                 Fp::from(0u64),
                 Fp::from(0u64),
                 Fp::from(0u64),
-            ], // the i-th entry is the i-th leaf.
+            ],
         )
         .unwrap();
 
-        // Now, let's try to generate a membership proof for the 5th item.
-        let proof_exp = tree.generate_proof(0).unwrap(); // we're 0-indexing!
-                                                         // This should be a proof for the membership of a leaf with value 9. Let's check that!
-
-        let proof_birth = tree.generate_proof(1).unwrap();
-        // First, let's get the root we want to verify against:
+        let proof_birth = tree.generate_proof(0).unwrap();
+        let proof_exp = tree.generate_proof(1).unwrap();
         let root = tree.root();
+        // cur year
+        let cur_time = Fp::from(2025u64);
 
         let circuit = VroomLicenseCircuit {
             // constants
@@ -163,38 +210,26 @@ pub mod test {
 
             // public inputs
             root,
-            leaf_exp: Fp::from(20400318u64),
-            cur_time: Fp::from(20250219u64),
+            exp_hash,
+            birth_hash,
+            cur_time,
 
             // witness
             auth_path_exp: Some(proof_exp),
             auth_path_birth: Some(proof_birth),
-            birth: Fp::from(20010319u64),
+            birth,
+            birth_rng,
+            exp,
+            exp_rng,
         };
 
         let (pk, vk) = Groth16::<ark_bn254::Bn254>::setup(circuit.clone(), rng).unwrap();
 
         let pvk = Groth16::<ark_bn254::Bn254>::process_vk(&vk).unwrap();
 
-        // let leaf_fp = BigInteger256::from(9u8);
-        let leaf_exp = Fp::from(20400318u64);
-        let cur_time = Fp::from(20250219u64);
-        let verify_inputs = [root, leaf_exp, cur_time];
+        let verify_inputs = [root, exp_hash, birth_hash, cur_time];
 
-        let proofs = Groth16::<ark_bn254::Bn254>::prove(&pk, circuit, rng).unwrap();
-
-        /*let mut proof_vec: Vec<ark_bn254::Fq> = vec![];
-        let x = proofs.a.x.to_field_elements().unwrap();
-        let y = proofs.a.x.to_field_elements().unwrap();
-
-        let a = [x, y].concat();
-
-        proof_vec.extend(&a);
-        println!("let proof = [");
-        for x in proof_vec.iter() {
-            println!("{}", x.to_string());
-        }
-        println!("]");*/
+        let proofs = Groth16::<ark_bn254::Bn254>::prove(&pk, circuit.clone(), rng).unwrap();
 
         let proof_json = json!({
             "proof": [
@@ -209,7 +244,10 @@ pub mod test {
             ]
         });
 
-        println!("proof : {:?}", proof_json);
+        // println!("proof : {:?}", proof_json);
+
+        fs::write("../contract/public/proof.json", proof_json.to_string())
+            .expect("Failed to save proof");
 
         let beta_g2 = -vk.beta_g2;
         let delta_g2 = -vk.delta_g2;
@@ -238,46 +276,79 @@ pub mod test {
                 BigUint::from_bytes_be(&vk.gamma_abc_g1[2].x.into_repr().to_bytes_be()).to_str_radix(10),
                 BigUint::from_bytes_be(&vk.gamma_abc_g1[2].y.into_repr().to_bytes_be()).to_str_radix(10),
                 BigUint::from_bytes_be(&vk.gamma_abc_g1[3].x.into_repr().to_bytes_be()).to_str_radix(10),
-                BigUint::from_bytes_be(&vk.gamma_abc_g1[3].y.into_repr().to_bytes_be()).to_str_radix(10)
+                BigUint::from_bytes_be(&vk.gamma_abc_g1[3].y.into_repr().to_bytes_be()).to_str_radix(10),
+                BigUint::from_bytes_be(&vk.gamma_abc_g1[4].x.into_repr().to_bytes_be()).to_str_radix(10),
+                BigUint::from_bytes_be(&vk.gamma_abc_g1[4].y.into_repr().to_bytes_be()).to_str_radix(10)
             ]
         });
 
-        print!("vk : {:?}", vk_json);
-
-        let verify_inputs_dec: Vec<String> =
-            verify_inputs.iter().map(|x| fr_to_decimal(*x)).collect();
-
-        // JSON 출력 verify_input이 몇개 있는지 알 수 있다
-        /*let json_output = json!({
-            "verify_inputs": verify_inputs_dec
-        });
-
-        print!("{:?}", json_output);*/
+        //print!("vk : {:?}", vk_json);
         /*let mut gamma_abc_g1 = String::new();
         for g in &vk.gamma_abc_g1 {
             let (x, y) = (g.x, g.y);
             println!(
-                "{:?}, {:?}",
+                "{:?}, {:?} : input count",
                 x.into_repr().to_string(),
                 y.into_repr().to_string()
             );
         }*/
 
+        fs::write("../contract/public/vk.json", vk_json.to_string()).expect("Failed to save vk");
+
         let input_json = json!({
-            "proof": [
+            "input": [
                 BigUint::from_bytes_be(&verify_inputs[0].into_repr().to_bytes_be()).to_str_radix(10),
                 BigUint::from_bytes_be(&verify_inputs[1].into_repr().to_bytes_be()).to_str_radix(10),
                 BigUint::from_bytes_be(&verify_inputs[2].into_repr().to_bytes_be()).to_str_radix(10),
+                BigUint::from_bytes_be(&verify_inputs[3].into_repr().to_bytes_be()).to_str_radix(10),
             ]
         });
 
-        println!("input : {:?}", input_json);
+        //println!("input : {:?}", input_json);
+        fs::write("../contract/public/input.json", input_json.to_string())
+            .expect("Failed to save vk");
 
         assert!(Groth16::<ark_bn254::Bn254>::verify_with_processed_vk(
             &pvk,
             &verify_inputs,
             &proofs
         )
-        .unwrap(),)
+        .unwrap(),);
+
+        // get number of constraints
+        let cs = ConstraintSystem::<Fp>::new_ref();
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        let num_constraints = cs.num_constraints();
+        println!("Number of constraints: {:?}", num_constraints);
+
+        // signature
+        let secp = Secp256k1::new();
+        let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("32 bytes, within curve order");
+        let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
+
+        let message = BigUint::from_bytes_be(&root.into_repr().to_bytes_be()).to_str_radix(10);
+
+        // add Ethereum Signed Message prefix
+        let eth_prefix = format!("\x19Ethereum Signed Message:\n{}", message.len());
+        let eth_message = [eth_prefix.as_bytes(), message.as_bytes()].concat();
+        let message_hash = Keccak256::digest(&eth_message);
+
+        let m = Message::from_slice(&message_hash).expect("32-byte message hash");
+        let (rec_id, sig_bytes) = secp
+            .sign_ecdsa_recoverable(&m, &secret_key)
+            .serialize_compact();
+
+        let v = rec_id.to_i32() as u8 + 27;
+        let r = &sig_bytes[0..32];
+        let s = &sig_bytes[32..64];
+
+        let pubkey_bytes = public_key.serialize_uncompressed();
+        let pubkey_hash = Keccak256::digest(&pubkey_bytes[1..]);
+        let eth_address = &pubkey_hash[12..];
+
+        println!("Message: {}", message);
+        println!("Ethereum Address: 0x{}", hex::encode(eth_address));
+        println!("v: {}, r: 0x{}, s: 0x{}", v, hex::encode(r), hex::encode(s));
     }
 }
