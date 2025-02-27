@@ -58,12 +58,13 @@ impl ConstraintSynthesizer<Fp> for VroomLicenseCircuit<Fp> {
             FpVar::new_input(ark_relations::ns!(cs, "curtime_var"), || Ok(&self.cur_time))?;
 
         // witness
-        let auth_path_exp = SimplePathVar::new_witness(ark_relations::ns!(cs, "path_var"), || {
-            Ok(self.auth_path_exp.as_ref().unwrap())
-        })?;
+        let auth_path_exp =
+            SimplePathVar::new_witness(ark_relations::ns!(cs, "exp_path_var"), || {
+                Ok(self.auth_path_exp.as_ref().unwrap())
+            })?;
 
         let auth_path_birth =
-            SimplePathVar::new_witness(ark_relations::ns!(cs, "path_var"), || {
+            SimplePathVar::new_witness(ark_relations::ns!(cs, "birth_path_var"), || {
                 Ok(self.auth_path_birth.as_ref().unwrap())
             })?;
 
@@ -75,7 +76,7 @@ impl ConstraintSynthesizer<Fp> for VroomLicenseCircuit<Fp> {
 
         let exp = FpVar::new_witness(ark_relations::ns!(cs, "exp_var"), || Ok(self.exp))?;
         let exp_rng =
-            LeafHashParamsVar::new_witness(ark_relations::ns!(cs, "birth_rng_var"), || {
+            LeafHashParamsVar::new_witness(ark_relations::ns!(cs, "exp_rng_var"), || {
                 Ok(&self.birth_rng)
             })?;
 
@@ -115,7 +116,7 @@ impl ConstraintSynthesizer<Fp> for VroomLicenseCircuit<Fp> {
         // 20 < age < 30
         let age_gap = cur_time - birth;
         let criterion_low = FpVar::Constant(Fp::from(19u64));
-        let criterion_high = FpVar::Constant(Fp::from(31u64));
+        let criterion_high = FpVar::Constant(Fp::from(30u64));
         age_gap.enforce_cmp(&criterion_low, std::cmp::Ordering::Greater, false)?;
         criterion_high.enforce_cmp(&age_gap, std::cmp::Ordering::Greater, false)?;
 
@@ -357,6 +358,7 @@ pub mod test {
 
         //println!("input : {:?}", input_json);
         fs::write("../contract/public/sig.json", sig_json.to_string()).expect("Failed to save sig");
+
         println!("Message: {}", message);
         println!("Ethereum Address: 0x{}", hex::encode(eth_address));
         println!("v: {}, r: 0x{}, s: 0x{}", v, hex::encode(r), hex::encode(s));
